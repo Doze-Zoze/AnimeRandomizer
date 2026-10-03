@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>anime quiz thing wowowowow</title>
+    <style>
+        body {
+            height: calc(100vh - 200px);
+            max-height: 100vh;
+            margin: 0px;
+            background-color: #000;
+            color: #fff;
+        }
+       .controls {
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #555;
+            margin: 5px;
+            height: 70px;
+            width: 50%;
+            min-width: fit-content;
+       }
+       .controlContainer {
+            display: flex;
+            justify-content: center;
+       }
+    </style>
+</head>
+<body>
+<div class="controlContainer">
+    <div class="controls">
+        <input type="text" id="username" placeholder="Anilist Name" /> 
+        <button onclick="getRandomAnime()">Randomize</button><br/>
+        <input type="checkbox" id="allepisodes">
+        <label for="allepisodes">Allow All Episodes</label><br/>
+        <input type="checkbox" id="allowRepeatAnimes">
+        <label for="allowRepeatAnimes">Allow Repeat Animes (<span id="seenCount">0</span> seen)</label> 
+        <button onclick="resetDoneAnime()">Reset Seen Anime</button>
+    </div>
+
+    <div class="controls">
+        <input onclick="updateNameDisplay()"type="checkbox" id="showName">
+        <label for="showName">Show Name</label> /
+        <input onclick="updateNameDisplay()" type="checkbox" id="showEp" checked>
+        <label for="showEp">Show Episode</label><br/>
+        <div id="status">No Anime Selected</div>
+    </div>
+</div>
+
+    <div class="iframe-container" id="streamContainer" style="width: 100%; height: 100%;">
+        <iframe id="streamFrame" src="" width="100%" height="100%" frameborder="0" scrolling="no" allowfullscreen allow="autoplay; encrypted-media; picture-in-picture"></iframe>
+    </div>
+
+    <script>
+        var aniListName = localStorage.getItem("aniName") || "";
+        var allAnime = [];
+        var doneAnime = JSON.parse(localStorage.getItem("doneAnime")) || [];
+        var currentAnime = null;
+        var episode = 1;
+        
+
+        window.addEventListener("DOMContentLoaded", () => {
+                seenCount.innerText = doneAnime.length;
+                document.getElementById('username').value = aniListName;
+        });
+        async function getRandomAnime() {
+
+        const username = document.getElementById('username').value.trim();
+        const statusDiv = document.getElementById('status');
+        const container = document.getElementById('streamContainer');
+        const iframe = document.getElementById('streamFrame');
+        const seenCount = document.getElementById('seenCount');
+        const allepisodes = document.getElementById('allepisodes').checked;
+        const repeat = document.getElementById('allowRepeatAnimes').checked;
+            if (!username) {
+                statusDiv.innerText = "Please enter a username.";
+                return;
+            }
+
+            statusDiv.innerText = "Fetching list from AniList...";
+            container.style.display = "none";
+            iframe.src = "";
+            const url = 'https://graphql.anilist.co';
+            const query = `
+            query ($username: String) {
+              MediaListCollection (userName: $username, type: ANIME, status_in: [CURRENT, COMPLETED]) {
+                lists {
+                  entries {
+                    mediaId
+                    media {
+                      title {
+                        english
+                        userPreferred
+                      }
+                     episodes
+                    }
+                  }
+                }
+              }
+            }`;
+
+            try {
+                if (aniListName != username || allAnime.length == 0) 
+                {
+                    localStorage.setItem("aniName", username);
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                        },
+                        body: JSON.stringify({ query, variables: { username } })
+                    });
+
+                    if (!response.ok) {
+                        const errorJson = await response.json().catch(() => ({}));
+                        const errMsg = errorJson.errors?.[0]?.message || `User "${username}" not found (Status ${response.status})`;
+                        throw new Error(errMsg);
+                    }
+
+                    const json = await response.json();
+
+                    if (!json.data?.MediaListCollection?.lists) {
+                        throw new Error("Could not find list records for this user profile.");
+                    }
+
+                    const lists = json.data.MediaListCollection.lists;
+                    allAnime = [];
+                    lists.forEach(list => {
+                        allAnime = allAnime.concat(list.entries);
+                    });
+                }
+                
+                if (allAnime.length === 0) {
+                    statusDiv.innerText = `No anime found for "${username}".`;
+                    return;
+                }
+                var maxCount = 10000;
+                if (repeat)
+                    maxCount = 1;
+                while (maxCount > 0) {
+                    currentAnime = allAnime[Math.floor(Math.random() * allAnime.length)];
+                    maxCount--;
+                    if (!doneAnime.some(ani => ani.mediaId == currentAnime.mediaId)) {
+                        console.log(1000-maxCount);
+                        maxCount = 0;
+                    }
+                }
+                if (!doneAnime.some(ani => ani.mediaId == currentAnime.mediaId))
+                    doneAnime.push(currentAnime);
+                localStorage.setItem("doneAnime", JSON.stringify(doneAnime));
+                seenCount.innerText = doneAnime.length;
+                const animeId = currentAnime.mediaId;
+                const animeTitle = currentAnime.media.title.english ?? currentAnime.media.title.userPreferred;
+                
+                episode = 1;
+                if (allepisodes) episode = Math.floor(Math.random() * currentAnime.media.episodes)+1;
+                await updateNameDisplay();
+                iframe.src = `https://megaplay.buzz/stream/ani/${animeId}/${episode}/sub`;
+                container.style.display = "block";
+
+            } catch (error) {
+                statusDiv.innerText = `Error: ${error.message}`;
+                console.error("Detailed Debug Log:", error);
+            }
+        }
+
+        async function updateNameDisplay() {
+            const statusDiv = document.getElementById('status');
+                const animeTitle = currentAnime.media.title.english ?? currentAnime.media.title.userPreferred;
+            const showname = document.getElementById('showName').checked;
+            const showep = document.getElementById('showEp').checked;
+            
+                let anitext = ""//Anime ID: ${currentAnime.mediaId}`;
+                if (showname) anitext = animeTitle + "\n";
+
+                if (showep) anitext = anitext + `Episode ${episode}`
+                
+                statusDiv.innerText = anitext;
+        }
+
+        async function resetDoneAnime() {
+            localStorage.removeItem("doneAnime");
+            doneAnime = [];
+            seenCount.innerText = 0;
+        }
+    </script>
+</body>
+</html>
